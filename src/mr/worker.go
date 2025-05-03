@@ -3,8 +3,10 @@ package mr
 import (
 	"fmt"
 	"hash/fnv"
+	"io"
 	"log"
 	"net/rpc"
+	"os"
 )
 
 // Map functions return a slice of KeyValue.
@@ -31,11 +33,22 @@ func Worker(
 	reply := TaskRequestReply{}
 
 	ok := call("Coordinator.Assign", args, &reply)
-	if ok {
-		fmt.Printf("received task: type=%s, file=%s\n", reply.Type, reply.File)
-	} else {
-		fmt.Println("request task failed!")
+	if !ok {
+		log.Fatal("request task failed")
 	}
+
+	task := reply.Task
+	file, err := os.Open(task.Filename)
+	if err != nil {
+		log.Fatalf("cannot read %v", task.Filename)
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		log.Fatalf("cannot read %v", task.Filename)
+	}
+	file.Close()
+	kva := mapf(task.Filename, string(content))
+	fmt.Println(kva)
 }
 
 // example function to show how to make an RPC call to the coordinator.
@@ -68,7 +81,7 @@ func CallExample() {
 // send an RPC request to the coordinator, wait for the response.
 // usually returns true.
 // returns false if something goes wrong.
-func call(rpcname string, args interface{}, reply interface{}) bool {
+func call(rpcname string, args any, reply any) bool {
 	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
 	sockname := coordinatorSock()
 	c, err := rpc.DialHTTP("unix", sockname)

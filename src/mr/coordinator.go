@@ -16,8 +16,8 @@ const (
 	PendingStatus   TaskStatus = "pending"
 	CompletedStatus TaskStatus = "completed"
 
-	MapType    TaskType = "map"
-	ReduceType TaskType = "reduce"
+	MapTask    TaskType = "map"
+	ReduceTask TaskType = "reduce"
 )
 
 type Coordinator struct {
@@ -27,17 +27,16 @@ type Coordinator struct {
 }
 
 type Task struct {
-	File   string
-	Status TaskStatus
-	Type   TaskType
+	Filename string
+	Status   TaskStatus
+	Type     TaskType
 }
 
 // Your code here -- RPC handlers for the worker to call.
 func (c *Coordinator) Assign(args *TaskRequestArgs, reply *TaskRequestReply) error {
 	for _, task := range c.Tasks {
-		if task.Type == MapType && task.Status == IdleStatus {
-			reply.File = task.File
-			reply.Type = task.Type
+		if task.Type == MapTask && task.Status == IdleStatus {
+			reply.Task = task
 			break
 		}
 	}
@@ -87,9 +86,9 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	// create Map tasks
 	for _, file := range files {
 		mTask := Task{
-			Status: IdleStatus,
-			File:   file,
-			Type:   MapType,
+			Status:   IdleStatus,
+			Filename: file,
+			Type:     MapTask,
 		}
 		c.Tasks = append(c.Tasks, mTask)
 	}
