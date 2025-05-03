@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"time"
 )
 
 // Map functions return a slice of KeyValue.
@@ -23,12 +24,8 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-// main/mrworker.go calls this function.
-func Worker(
-	mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string,
-) {
-	// request for a task from coordinator
+// request for a task from coordinator
+func getTask() *Task {
 	args := TaskRequestArgs{}
 	reply := TaskRequestReply{}
 
@@ -36,19 +33,32 @@ func Worker(
 	if !ok {
 		log.Fatal("request task failed")
 	}
+	return reply.Task
+}
 
-	task := reply.Task
-	file, err := os.Open(task.Filename)
-	if err != nil {
-		log.Fatalf("cannot read %v", task.Filename)
+// main/mrworker.go calls this function.
+func Worker(
+	mapf func(string, string) []KeyValue,
+	reducef func(string, []string) string,
+) {
+	for {
+		task := getTask()
+		if task == nil {
+			time.Sleep(100 * time.Millisecond)
+		} else {
+			file, err := os.Open(task.Filename)
+			if err != nil {
+				log.Fatalf("cannot read %v", task.Filename)
+			}
+			content, err := io.ReadAll(file)
+			if err != nil {
+				log.Fatalf("cannot read %v", task.Filename)
+			}
+			file.Close()
+			kva := mapf(task.Filename, string(content))
+			fmt.Println(len(kva))
+		}
 	}
-	content, err := io.ReadAll(file)
-	if err != nil {
-		log.Fatalf("cannot read %v", task.Filename)
-	}
-	file.Close()
-	kva := mapf(task.Filename, string(content))
-	fmt.Println(kva)
 }
 
 // example function to show how to make an RPC call to the coordinator.

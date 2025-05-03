@@ -28,6 +28,7 @@ type Coordinator struct {
 
 type Task struct {
 	Filename string
+	ID       int
 	Status   TaskStatus
 	Type     TaskType
 }
@@ -36,7 +37,7 @@ type Task struct {
 func (c *Coordinator) Assign(args *TaskRequestArgs, reply *TaskRequestReply) error {
 	for _, task := range c.Tasks {
 		if task.Type == MapTask && task.Status == IdleStatus {
-			reply.Task = task
+			reply.Task = &task
 			break
 		}
 	}
@@ -84,10 +85,11 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	}
 
 	// create Map tasks
-	for _, file := range files {
+	for idx, file := range files {
 		mTask := Task{
-			Status:   IdleStatus,
 			Filename: file,
+			ID:       idx,
+			Status:   IdleStatus,
 			Type:     MapTask,
 		}
 		c.Tasks = append(c.Tasks, mTask)

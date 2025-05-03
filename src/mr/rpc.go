@@ -29,7 +29,7 @@ type TaskRequestArgs struct {
 }
 
 type TaskRequestReply struct {
-	Task Task
+	Task *Task
 }
 
 // Cook up a unique-ish UNIX-domain socket name
