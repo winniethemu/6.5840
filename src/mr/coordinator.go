@@ -8,15 +8,39 @@ import (
 	"os"
 )
 
+type TaskStatus string
+type TaskType string
+
+const (
+	IdleStatus      TaskStatus = "idle"
+	PendingStatus   TaskStatus = "pending"
+	CompletedStatus TaskStatus = "completed"
+
+	MapType    TaskType = "map"
+	ReduceType TaskType = "reduce"
+)
+
 type Coordinator struct {
-	files   []string
-	nReduce int
+	Files []string
+	// TODO: how do we know which worker is working on what task?
+	Tasks []Task
+}
+
+type Task struct {
+	File   string
+	Status TaskStatus
+	Type   TaskType
 }
 
 // Your code here -- RPC handlers for the worker to call.
 func (c *Coordinator) Assign(args *TaskRequestArgs, reply *TaskRequestReply) error {
-	reply.Type = "map"
-	reply.File = "foo.txt"
+	for _, task := range c.Tasks {
+		if task.Type == MapType && task.Status == IdleStatus {
+			reply.File = task.File
+			reply.Type = task.Type
+			break
+		}
+	}
 	return nil
 }
 
@@ -56,9 +80,19 @@ func (c *Coordinator) Done() bool {
 // main/mrcoordinator.go calls this function.
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
-	c := Coordinator{}
+	c := Coordinator{
+		Files: files,
+	}
 
-	// Your code here.
+	// create Map tasks
+	for _, file := range files {
+		mTask := Task{
+			Status: IdleStatus,
+			File:   file,
+			Type:   MapType,
+		}
+		c.Tasks = append(c.Tasks, mTask)
+	}
 
 	c.server()
 	return &c

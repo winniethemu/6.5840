@@ -31,11 +31,10 @@ func Worker(
 	reply := TaskRequestReply{}
 
 	ok := call("Coordinator.Assign", args, &reply)
-	if !ok {
-		fmt.Println("request task failed!")
-		return
+	if ok {
+		fmt.Printf("received task: type=%s, file=%s\n", reply.Type, reply.File)
 	} else {
-		fmt.Println("received task: ", "type", reply.Type, "Filename", reply.File)
+		fmt.Println("request task failed!")
 	}
 }
 
