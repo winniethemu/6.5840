@@ -46,6 +46,15 @@ func getTask() *Task {
 	return reply.Task
 }
 
+func updateTask(task *Task) {
+	args := TaskUpdateArgs{task}
+	reply := TaskUpdateReply{}
+	ok := call("Coordinator.Update", args, &reply)
+	if !ok {
+		log.Fatal("update task failed")
+	}
+}
+
 // main/mrworker.go calls this function.
 func Worker(
 	mapf func(string, string) []KeyValue,
@@ -53,43 +62,49 @@ func Worker(
 ) {
 	_, nReduce := getMetadata()
 
-	// for {
-	task := getTask() // FIXME: right now this is always a Map task
-	if task == nil {
-		time.Sleep(100 * time.Millisecond)
-	} else {
-		// perform Map operation on input
-		file, err := os.Open(task.Filename)
-		if err != nil {
-			log.Fatalf("cannot read %v", task.Filename)
-		}
-		content, err := io.ReadAll(file)
-		if err != nil {
-			log.Fatalf("cannot read %v", task.Filename)
-		}
-		file.Close()
-		kva := mapf(task.Filename, string(content))
+	for {
+		task := getTask() // FIXME: right now this is always a Map task
+		if task == nil {
+			time.Sleep(100 * time.Millisecond)
+		} else if task.Type == MapTaskType {
+			// perform Map operation on input
+			file, err := os.Open(task.Filename)
+			if err != nil {
+				log.Fatalf("cannot read %v", task.Filename)
+			}
+			content, err := io.ReadAll(file)
+			if err != nil {
+				log.Fatalf("cannot read %v", task.Filename)
+			}
+			file.Close()
+			kva := mapf(task.Filename, string(content))
 
-		// persist intermediate results in files
-		encoders := make(map[int]*json.Encoder)
-		for r := range nReduce {
-			filename := fmt.Sprintf("mr-tmp/mr-%v-%v", task.ID, r)
-			f, err := os.OpenFile(filename, os.O_RDWR, 0644)
-			if err != nil {
-				log.Fatalf("cannot read %v", filename)
+			// persist intermediate results in files
+			encoders := make(map[int]*json.Encoder)
+			for r := range nReduce {
+				filename := fmt.Sprintf("mr-tmp/mr-%v-%v", task.ID, r)
+				f, err := os.OpenFile(filename, os.O_RDWR, 0644)
+				if err != nil {
+					log.Fatalf("cannot read %v", filename)
+				}
+				defer f.Close()
+				encoders[r] = json.NewEncoder(f)
 			}
-			defer f.Close()
-			encoders[r] = json.NewEncoder(f)
-		}
-		for _, kv := range kva {
-			r := ihash(kv.Key) % nReduce
-			err := encoders[r].Encode(&kv)
-			if err != nil {
-				log.Fatalf("writing to file failed: %v", err)
+			for _, kv := range kva {
+				r := ihash(kv.Key) % nReduce
+				err := encoders[r].Encode(&kv)
+				if err != nil {
+					log.Fatalf("writing to file failed: %v", err)
+				}
 			}
+
+			task.Status = CompletedStatus
+			updateTask(task)
+		} else { // task.Type == ReduceTaskType
+			fmt.Println("Time to reduce!")
+			break
 		}
 	}
-	// }
 }
 
 // example function to show how to make an RPC call to the coordinator.

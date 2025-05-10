@@ -47,12 +47,37 @@ func (c *Coordinator) Metadata(args *MetadataArgs, reply *MetadataReply) error {
 // tasks, assign the next one; When all Map tasks are completed, assign
 // Reduce tasks.
 func (c *Coordinator) Assign(args *TaskRequestArgs, reply *TaskRequestReply) error {
+	completed := 0
+
 	for i, task := range c.MapTasks {
 		if task.Status == IdleStatus {
 			reply.Task = &task
 			c.MapTasks[i].Status = PendingStatus
-			break
+			return nil
+		} else if task.Status == CompletedStatus {
+			completed++
 		}
+	}
+
+	if completed == len(c.MapTasks) {
+		for i, task := range c.ReduceTasks {
+			if task.Status == IdleStatus {
+				reply.Task = &task
+				c.ReduceTasks[i].Status = PendingStatus
+				return nil
+			}
+		}
+	}
+
+	return nil
+}
+
+func (c *Coordinator) Update(args *TaskUpdateArgs, reply *TaskUpdateReply) error {
+	task := args.Task
+	if task.Type == MapTaskType {
+		c.MapTasks[task.ID] = *task
+	} else if task.Type == ReduceTaskType {
+		c.ReduceTasks[task.ID] = *task
 	}
 	return nil
 }
