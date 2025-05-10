@@ -24,11 +24,20 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-// request for a task from coordinator
+func getMetadata() (int, int) {
+	args := MetadataArgs{}
+	reply := MetadataReply{}
+	ok := call("Coordinator.Metadata", args, &reply)
+	if !ok {
+		log.Fatal("get metadata failed")
+	}
+	return reply.NMap, reply.NReduce
+}
+
+// Request for a task from coordinator
 func getTask() *Task {
 	args := TaskRequestArgs{}
 	reply := TaskRequestReply{}
-
 	ok := call("Coordinator.Assign", args, &reply)
 	if !ok {
 		log.Fatal("request task failed")
@@ -41,24 +50,36 @@ func Worker(
 	mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string,
 ) {
-	for {
-		task := getTask()
-		if task == nil {
-			time.Sleep(100 * time.Millisecond)
-		} else {
-			file, err := os.Open(task.Filename)
-			if err != nil {
-				log.Fatalf("cannot read %v", task.Filename)
-			}
-			content, err := io.ReadAll(file)
-			if err != nil {
-				log.Fatalf("cannot read %v", task.Filename)
-			}
-			file.Close()
-			kva := mapf(task.Filename, string(content))
-			fmt.Println(len(kva))
+	_, nReduce := getMetadata()
+
+	// for {
+	task := getTask()
+	if task == nil {
+		time.Sleep(100 * time.Millisecond)
+	} else {
+		file, err := os.Open(task.Filename)
+		if err != nil {
+			log.Fatalf("cannot read %v", task.Filename)
+		}
+		content, err := io.ReadAll(file)
+		if err != nil {
+			log.Fatalf("cannot read %v", task.Filename)
+		}
+		file.Close()
+		kva := mapf(task.Filename, string(content))
+
+		intermediate := make(map[int][]KeyValue)
+		for _, kv := range kva {
+			idx := ihash(kv.Key) % nReduce
+			intermediate[idx] = append(intermediate[idx], kv)
+		}
+
+		for key := range intermediate {
+			fmt.Println(key, intermediate[key])
+			fmt.Println()
 		}
 	}
+	// }
 }
 
 // example function to show how to make an RPC call to the coordinator.

@@ -1,6 +1,7 @@
 package mr
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -8,22 +9,23 @@ import (
 	"os"
 )
 
-type TaskStatus string
-type TaskType string
-
 const (
 	IdleStatus      TaskStatus = "idle"
 	PendingStatus   TaskStatus = "pending"
 	CompletedStatus TaskStatus = "completed"
 
-	MapTask    TaskType = "map"
-	ReduceTask TaskType = "reduce"
+	MapTaskType    TaskType = "map"
+	ReduceTaskType TaskType = "reduce"
 )
+
+type TaskStatus string
+type TaskType string
 
 type Coordinator struct {
 	Files []string
 	// TODO: how do we know which worker is working on what task?
-	Tasks []Task
+	MapTasks    []Task
+	ReduceTasks []Task
 }
 
 type Task struct {
@@ -34,10 +36,21 @@ type Task struct {
 }
 
 // Your code here -- RPC handlers for the worker to call.
+
+func (c *Coordinator) Metadata(args *MetadataArgs, reply *MetadataReply) error {
+	reply.NMap = len(c.MapTasks)
+	reply.NReduce = len(c.ReduceTasks)
+	return nil
+}
+
+// Assigns available tasks to workers upon request. If there's any idle Map
+// tasks, assign the next one; When all Map tasks are completed, assign
+// Reduce tasks.
 func (c *Coordinator) Assign(args *TaskRequestArgs, reply *TaskRequestReply) error {
-	for _, task := range c.Tasks {
-		if task.Type == MapTask && task.Status == IdleStatus {
+	for i, task := range c.MapTasks {
+		if task.Status == IdleStatus {
 			reply.Task = &task
+			c.MapTasks[i].Status = PendingStatus
 			break
 		}
 	}
@@ -86,13 +99,31 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	// create Map tasks
 	for idx, file := range files {
-		mTask := Task{
+		task := Task{
 			Filename: file,
 			ID:       idx,
 			Status:   IdleStatus,
-			Type:     MapTask,
+			Type:     MapTaskType,
 		}
-		c.Tasks = append(c.Tasks, mTask)
+		c.MapTasks = append(c.MapTasks, task)
+	}
+
+	// create Reduce tasks
+	for idx := range nReduce {
+		task := Task{
+			ID:     idx,
+			Status: IdleStatus,
+			Type:   ReduceTaskType,
+		}
+		c.ReduceTasks = append(c.ReduceTasks, task)
+	}
+
+	// create intermediate files
+	for m := range len(files) {
+		for r := range nReduce {
+			fname := fmt.Sprintf("mr-tmp/mr-%v-%v", m, r)
+			os.Create(fname)
+		}
 	}
 
 	c.server()
