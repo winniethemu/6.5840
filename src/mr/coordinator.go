@@ -22,8 +22,7 @@ type TaskStatus string
 type TaskType string
 
 type Coordinator struct {
-	Files []string
-	// TODO: how do we know which worker is working on what task?
+	Files       []string
 	MapTasks    []Task
 	ReduceTasks []Task
 }

@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"sort"
 	"time"
 )
 
@@ -60,10 +61,10 @@ func Worker(
 	mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string,
 ) {
-	_, nReduce := getMetadata()
+	nMap, nReduce := getMetadata()
 
 	for {
-		task := getTask() // FIXME: right now this is always a Map task
+		task := getTask()
 		if task == nil {
 			time.Sleep(100 * time.Millisecond)
 		} else if task.Type == MapTaskType {
@@ -101,8 +102,46 @@ func Worker(
 			task.Status = CompletedStatus
 			updateTask(task)
 		} else { // task.Type == ReduceTaskType
-			fmt.Println("Time to reduce!")
-			break
+			kva := []KeyValue{}
+			for m := range nMap {
+				filename := fmt.Sprintf("mr-tmp/mr-%v-%v", m, task.ID)
+				f, err := os.Open(filename)
+				if err != nil {
+					log.Fatalf("cannot read %v", filename)
+				}
+				defer f.Close()
+				dec := json.NewDecoder(f)
+				for {
+					var kv KeyValue
+					if err := dec.Decode(&kv); err != nil {
+						break
+					}
+					kva = append(kva, kv)
+				}
+			}
+			sort.Sort(ByKey(kva))
+
+			oname := fmt.Sprintf("mr-out-%v", task.ID)
+			ofile, _ := os.Create(oname)
+			defer ofile.Close()
+
+			i := 0
+			for i < len(kva) {
+				j := i + 1
+				for j < len(kva) && kva[j].Key == kva[i].Key {
+					j++
+				}
+				values := []string{}
+				for k := i; k < j; k++ {
+					values = append(values, kva[k].Value)
+				}
+				output := reducef(kva[i].Key, values)
+				fmt.Fprintf(ofile, "%v %v\n", kva[i].Key, output)
+				i = j
+			}
+
+			task.Status = CompletedStatus
+			updateTask(task)
 		}
 	}
 }
