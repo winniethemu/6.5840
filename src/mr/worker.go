@@ -1,6 +1,7 @@
 package mr
 
 import (
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -53,10 +54,11 @@ func Worker(
 	_, nReduce := getMetadata()
 
 	// for {
-	task := getTask()
+	task := getTask() // FIXME: right now this is always a Map task
 	if task == nil {
 		time.Sleep(100 * time.Millisecond)
 	} else {
+		// perform Map operation on input
 		file, err := os.Open(task.Filename)
 		if err != nil {
 			log.Fatalf("cannot read %v", task.Filename)
@@ -68,15 +70,23 @@ func Worker(
 		file.Close()
 		kva := mapf(task.Filename, string(content))
 
-		intermediate := make(map[int][]KeyValue)
-		for _, kv := range kva {
-			idx := ihash(kv.Key) % nReduce
-			intermediate[idx] = append(intermediate[idx], kv)
+		// persist intermediate results in files
+		encoders := make(map[int]*json.Encoder)
+		for r := range nReduce {
+			filename := fmt.Sprintf("mr-tmp/mr-%v-%v", task.ID, r)
+			f, err := os.OpenFile(filename, os.O_RDWR, 0644)
+			if err != nil {
+				log.Fatalf("cannot read %v", filename)
+			}
+			defer f.Close()
+			encoders[r] = json.NewEncoder(f)
 		}
-
-		for key := range intermediate {
-			fmt.Println(key, intermediate[key])
-			fmt.Println()
+		for _, kv := range kva {
+			r := ihash(kv.Key) % nReduce
+			err := encoders[r].Encode(&kv)
+			if err != nil {
+				log.Fatalf("writing to file failed: %v", err)
+			}
 		}
 	}
 	// }
