@@ -32,11 +32,11 @@ type TaskRequestReply struct {
 	Task *Task
 }
 
-type TaskUpdateArgs struct {
+type TaskCompleteArgs struct {
 	Task *Task
 }
 
-type TaskUpdateReply struct {
+type TaskCompleteReply struct {
 }
 
 type MetadataArgs struct{}

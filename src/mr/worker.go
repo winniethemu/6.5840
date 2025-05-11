@@ -51,12 +51,12 @@ func getTask() *Task {
 	return reply.Task
 }
 
-func updateTask(task *Task) {
-	args := TaskUpdateArgs{task}
-	reply := TaskUpdateReply{}
-	ok := call("Coordinator.Update", args, &reply)
+func completeTask(task *Task) {
+	args := TaskCompleteArgs{task}
+	reply := TaskCompleteReply{}
+	ok := call("Coordinator.CompleteTask", args, &reply)
 	if !ok {
-		log.Fatal("update task failed")
+		log.Fatal("complete task failed")
 	}
 }
 
@@ -103,8 +103,7 @@ func Worker(
 				}
 			}
 
-			task.Status = CompletedStatus
-			updateTask(task)
+			completeTask(task)
 		} else { // task.Type == ReduceTaskType
 			kva := []KeyValue{}
 			for m := range nMap {
@@ -144,8 +143,7 @@ func Worker(
 				i = j
 			}
 
-			task.Status = CompletedStatus
-			updateTask(task)
+			completeTask(task)
 		}
 	}
 }

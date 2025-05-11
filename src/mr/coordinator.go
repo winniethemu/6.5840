@@ -52,19 +52,15 @@ func (c *Coordinator) Assign(args *TaskRequestArgs, reply *TaskRequestReply) err
 			reply.Task = &task
 			c.MapTasks[i].Status = PendingStatus
 			return nil
-		} else if task.Status == CompletedStatus {
-			c.Completed++
 		}
 	}
 
-	if c.Completed == len(c.MapTasks) {
+	if c.Completed >= len(c.MapTasks) {
 		for i, task := range c.ReduceTasks {
 			if task.Status == IdleStatus {
 				reply.Task = &task
 				c.ReduceTasks[i].Status = PendingStatus
 				return nil
-			} else if task.Status == CompletedStatus {
-				c.Completed++
 			}
 		}
 	}
@@ -72,13 +68,14 @@ func (c *Coordinator) Assign(args *TaskRequestArgs, reply *TaskRequestReply) err
 	return nil
 }
 
-func (c *Coordinator) Update(args *TaskUpdateArgs, reply *TaskUpdateReply) error {
+func (c *Coordinator) CompleteTask(args *TaskCompleteArgs, reply *TaskCompleteReply) error {
 	task := args.Task
 	if task.Type == MapTaskType {
-		c.MapTasks[task.ID] = *task
+		c.MapTasks[task.ID].Status = CompletedStatus
 	} else if task.Type == ReduceTaskType {
-		c.ReduceTasks[task.ID] = *task
+		c.ReduceTasks[task.ID].Status = CompletedStatus
 	}
+	c.Completed++
 	return nil
 }
 
@@ -107,7 +104,7 @@ func (c *Coordinator) server() {
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
-	return c.Completed >= len(c.MapTasks)+len(c.ReduceTasks)
+	return c.Completed == len(c.MapTasks)+len(c.ReduceTasks)
 }
 
 // create a Coordinator.
