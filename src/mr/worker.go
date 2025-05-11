@@ -42,7 +42,11 @@ func getTask() *Task {
 	reply := TaskRequestReply{}
 	ok := call("Coordinator.Assign", args, &reply)
 	if !ok {
-		log.Fatal("request task failed")
+		// if the worker fails to contact the coordinator, it can assume
+		// that the coordinator has exited because the job is done, so
+		// the worker can terminate too.
+		log.Println("request task failed")
+		os.Exit(0)
 	}
 	return reply.Task
 }
@@ -83,7 +87,7 @@ func Worker(
 			// persist intermediate results in files
 			encoders := make(map[int]*json.Encoder)
 			for r := range nReduce {
-				filename := fmt.Sprintf("mr-tmp/mr-%v-%v", task.ID, r)
+				filename := fmt.Sprintf("mr-%v-%v", task.ID, r)
 				f, err := os.OpenFile(filename, os.O_RDWR, 0644)
 				if err != nil {
 					log.Fatalf("cannot read %v", filename)
@@ -104,7 +108,7 @@ func Worker(
 		} else { // task.Type == ReduceTaskType
 			kva := []KeyValue{}
 			for m := range nMap {
-				filename := fmt.Sprintf("mr-tmp/mr-%v-%v", m, task.ID)
+				filename := fmt.Sprintf("mr-%v-%v", m, task.ID)
 				f, err := os.Open(filename)
 				if err != nil {
 					log.Fatalf("cannot read %v", filename)

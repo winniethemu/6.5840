@@ -22,6 +22,7 @@ type TaskStatus string
 type TaskType string
 
 type Coordinator struct {
+	Completed   int
 	Files       []string
 	MapTasks    []Task
 	ReduceTasks []Task
@@ -46,24 +47,24 @@ func (c *Coordinator) Metadata(args *MetadataArgs, reply *MetadataReply) error {
 // tasks, assign the next one; When all Map tasks are completed, assign
 // Reduce tasks.
 func (c *Coordinator) Assign(args *TaskRequestArgs, reply *TaskRequestReply) error {
-	completed := 0
-
 	for i, task := range c.MapTasks {
 		if task.Status == IdleStatus {
 			reply.Task = &task
 			c.MapTasks[i].Status = PendingStatus
 			return nil
 		} else if task.Status == CompletedStatus {
-			completed++
+			c.Completed++
 		}
 	}
 
-	if completed == len(c.MapTasks) {
+	if c.Completed == len(c.MapTasks) {
 		for i, task := range c.ReduceTasks {
 			if task.Status == IdleStatus {
 				reply.Task = &task
 				c.ReduceTasks[i].Status = PendingStatus
 				return nil
+			} else if task.Status == CompletedStatus {
+				c.Completed++
 			}
 		}
 	}
@@ -106,11 +107,7 @@ func (c *Coordinator) server() {
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
-	ret := false
-
-	// Your code here.
-
-	return ret
+	return c.Completed >= len(c.MapTasks)+len(c.ReduceTasks)
 }
 
 // create a Coordinator.
@@ -145,7 +142,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	// create intermediate files
 	for m := range len(files) {
 		for r := range nReduce {
-			fname := fmt.Sprintf("mr-tmp/mr-%v-%v", m, r)
+			fname := fmt.Sprintf("mr-%v-%v", m, r)
 			os.Create(fname)
 		}
 	}
