@@ -1,2 +1,4 @@
-pkg/
 *-handin.tar.gz
+mr-out*
+mr-[0-9]*
+pkg/
