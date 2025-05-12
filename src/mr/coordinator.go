@@ -165,18 +165,21 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 			case <-ch:
 				return
 			default:
-				for _, mt := range c.MapTasks {
+				for i, mt := range c.MapTasks {
 					if mt.Status == PendingStatus && time.Since(mt.StartTime) >= TimeoutDuration {
-						mt.Status = IdleStatus
+						c.mu.Lock()
+						c.MapTasks[i].Status = IdleStatus
+						c.mu.Unlock()
 					}
 				}
 
-				for _, rt := range c.MapTasks {
+				for i, rt := range c.ReduceTasks {
 					if rt.Status == PendingStatus && time.Since(rt.StartTime) >= TimeoutDuration {
-						rt.Status = IdleStatus
+						c.mu.Lock()
+						c.ReduceTasks[i].Status = IdleStatus
+						c.mu.Unlock()
 					}
 				}
-
 				time.Sleep(time.Second)
 			}
 		}
