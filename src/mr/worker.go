@@ -60,6 +60,89 @@ func completeTask(task *Task) {
 	}
 }
 
+func execMap(task *Task, mapFunc func(string, string) []KeyValue, nReduce int) {
+	// Perform Map operation on input.
+	file, err := os.Open(task.Filename)
+	if err != nil {
+		log.Fatalf("cannot read %v", task.Filename)
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		log.Fatalf("cannot read %v", task.Filename)
+	}
+	file.Close()
+	kva := mapFunc(task.Filename, string(content))
+
+	// Persist intermediate results in files.
+	//
+	// To ensure that nobody observes partially written files
+	// in the presence of crashes, we can employ the trick of
+	// using a temporary file and atomically renaming it once
+	// it is completely written.
+	encoders := make(map[int]*json.Encoder)
+	for r := range nReduce {
+		filename := fmt.Sprintf("mr-%v-%v", task.ID, r)
+		f, err := os.CreateTemp("", filename)
+		if err != nil {
+			log.Fatalf("cannot create %v", filename)
+		}
+		defer os.Rename(f.Name(), filename)
+		defer f.Close()
+		encoders[r] = json.NewEncoder(f)
+	}
+	for _, kv := range kva {
+		r := ihash(kv.Key) % nReduce
+		err := encoders[r].Encode(&kv)
+		if err != nil {
+			log.Fatalf("writing to file failed: %v", err)
+		}
+	}
+	completeTask(task)
+}
+
+func execReduce(task *Task, reduceFunc func(string, []string) string, nMap int) {
+	kva := []KeyValue{}
+	for m := range nMap {
+		filename := fmt.Sprintf("mr-%v-%v", m, task.ID)
+		f, err := os.Open(filename)
+		if err != nil {
+			log.Fatalf("cannot read %v", filename)
+		}
+		defer f.Close()
+		dec := json.NewDecoder(f)
+		for {
+			var kv KeyValue
+			if err := dec.Decode(&kv); err != nil {
+				break
+			}
+			kva = append(kva, kv)
+		}
+	}
+	sort.Sort(ByKey(kva))
+
+	oname := fmt.Sprintf("mr-out-%v", task.ID)
+	ofile, _ := os.CreateTemp("", oname)
+	// See above similar comment for Map
+	defer os.Rename(ofile.Name(), oname)
+	defer ofile.Close()
+
+	i := 0
+	for i < len(kva) {
+		j := i + 1
+		for j < len(kva) && kva[j].Key == kva[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, kva[k].Value)
+		}
+		output := reduceFunc(kva[i].Key, values)
+		fmt.Fprintf(ofile, "%v %v\n", kva[i].Key, output)
+		i = j
+	}
+	completeTask(task)
+}
+
 // main/mrworker.go calls this function.
 func Worker(
 	mapf func(string, string) []KeyValue,
@@ -72,78 +155,9 @@ func Worker(
 		if task == nil {
 			time.Sleep(100 * time.Millisecond)
 		} else if task.Type == MapTaskType {
-			// perform Map operation on input
-			file, err := os.Open(task.Filename)
-			if err != nil {
-				log.Fatalf("cannot read %v", task.Filename)
-			}
-			content, err := io.ReadAll(file)
-			if err != nil {
-				log.Fatalf("cannot read %v", task.Filename)
-			}
-			file.Close()
-			kva := mapf(task.Filename, string(content))
-
-			// persist intermediate results in files
-			encoders := make(map[int]*json.Encoder)
-			for r := range nReduce {
-				filename := fmt.Sprintf("mr-%v-%v", task.ID, r)
-				f, err := os.OpenFile(filename, os.O_RDWR, 0644)
-				if err != nil {
-					log.Fatalf("cannot read %v", filename)
-				}
-				defer f.Close()
-				encoders[r] = json.NewEncoder(f)
-			}
-			for _, kv := range kva {
-				r := ihash(kv.Key) % nReduce
-				err := encoders[r].Encode(&kv)
-				if err != nil {
-					log.Fatalf("writing to file failed: %v", err)
-				}
-			}
-
-			completeTask(task)
+			execMap(task, mapf, nReduce)
 		} else { // task.Type == ReduceTaskType
-			kva := []KeyValue{}
-			for m := range nMap {
-				filename := fmt.Sprintf("mr-%v-%v", m, task.ID)
-				f, err := os.Open(filename)
-				if err != nil {
-					log.Fatalf("cannot read %v", filename)
-				}
-				defer f.Close()
-				dec := json.NewDecoder(f)
-				for {
-					var kv KeyValue
-					if err := dec.Decode(&kv); err != nil {
-						break
-					}
-					kva = append(kva, kv)
-				}
-			}
-			sort.Sort(ByKey(kva))
-
-			oname := fmt.Sprintf("mr-out-%v", task.ID)
-			ofile, _ := os.Create(oname)
-			defer ofile.Close()
-
-			i := 0
-			for i < len(kva) {
-				j := i + 1
-				for j < len(kva) && kva[j].Key == kva[i].Key {
-					j++
-				}
-				values := []string{}
-				for k := i; k < j; k++ {
-					values = append(values, kva[k].Value)
-				}
-				output := reducef(kva[i].Key, values)
-				fmt.Fprintf(ofile, "%v %v\n", kva[i].Key, output)
-				i = j
-			}
-
-			completeTask(task)
+			execReduce(task, reducef, nMap)
 		}
 	}
 }
