@@ -2,7 +2,6 @@ package lock
 
 import (
 	"fmt"
-	//	"log"
 	"strconv"
 	"testing"
 	"time"

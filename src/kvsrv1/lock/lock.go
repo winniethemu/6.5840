@@ -1,7 +1,6 @@
 package lock
 
 import (
-	"sync"
 	"time"
 
 	"6.5840/kvsrv1/rpc"
@@ -14,8 +13,6 @@ type Lock struct {
 	// Put and Get.  The tester passes the clerk in when calling
 	// MakeLock().
 	ck kvtest.IKVClerk
-
-	mu sync.Mutex
 
 	// Lock state
 	owner string
@@ -34,35 +31,35 @@ func MakeLock(ck kvtest.IKVClerk, l string) *Lock {
 }
 
 func (lk *Lock) Acquire() {
-	lk.mu.Lock()
-	defer lk.mu.Unlock()
-
 	for {
 		val, ver, err := lk.ck.Get(lk.key)
 		if err == rpc.ErrNoKey {
-			lk.ck.Put(lk.key, lk.owner, 0)
-			return
+			res := lk.ck.Put(lk.key, lk.owner, 0)
+			if res == rpc.OK {
+				return
+			}
 		}
 		if val == "" {
-			lk.ck.Put(lk.key, lk.owner, ver)
-			return
+			res := lk.ck.Put(lk.key, lk.owner, ver)
+			if res == rpc.OK {
+				return
+			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 }
 
 func (lk *Lock) Release() {
-	lk.mu.Lock()
-	defer lk.mu.Unlock()
-
 	for {
 		val, ver, err := lk.ck.Get(lk.key)
 		if err == rpc.ErrNoKey || val == "" {
 			panic("cannot release an empty lock")
 		}
 		if val == lk.owner {
-			lk.ck.Put(lk.key, "", ver)
-			return
+			res := lk.ck.Put(lk.key, "", ver)
+			if res == rpc.OK {
+				return
+			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
