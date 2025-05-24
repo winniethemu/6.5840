@@ -2,6 +2,7 @@ package lock
 
 import (
 	"sync"
+	"time"
 
 	"6.5840/kvsrv1/rpc"
 	kvtest "6.5840/kvtest1"
@@ -19,7 +20,6 @@ type Lock struct {
 	// Lock state
 	owner string
 	key   string
-	done  chan bool
 }
 
 // The tester calls MakeLock() and passes in a k/v clerk; your code can
@@ -37,33 +37,33 @@ func (lk *Lock) Acquire() {
 	lk.mu.Lock()
 	defer lk.mu.Unlock()
 
-	val, ver, err := lk.ck.Get(lk.key)
-	if err == rpc.ErrNoKey {
-		lk.ck.Put(lk.key, lk.owner, 0)
-		return
+	for {
+		val, ver, err := lk.ck.Get(lk.key)
+		if err == rpc.ErrNoKey {
+			lk.ck.Put(lk.key, lk.owner, 0)
+			return
+		}
+		if val == "" {
+			lk.ck.Put(lk.key, lk.owner, ver)
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	if val == "" {
-		lk.ck.Put(lk.key, lk.owner, ver)
-		return
-	}
-
-	<-lk.done
-	lk.ck.Put(lk.key, lk.owner, ver)
 }
 
 func (lk *Lock) Release() {
 	lk.mu.Lock()
 	defer lk.mu.Unlock()
 
-	val, ver, err := lk.ck.Get(lk.key)
-	if err == rpc.ErrNoKey || val == "" {
-		panic("cannot release an empty lock")
+	for {
+		val, ver, err := lk.ck.Get(lk.key)
+		if err == rpc.ErrNoKey || val == "" {
+			panic("cannot release an empty lock")
+		}
+		if val == lk.owner {
+			lk.ck.Put(lk.key, "", ver)
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	if val != lk.owner {
-		panic("cannot release someone else's lock")
-	}
-	lk.ck.Put(lk.key, "", ver)
-
-	// Does this work in a distributed env? Channels are in-memory
-	lk.done <- true
 }
