@@ -13,7 +13,7 @@ const Debug = false
 
 type Record struct {
 	Value   string
-	Version uint64
+	Version rpc.Tversion
 }
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
@@ -42,6 +42,7 @@ func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 	if ok {
 		reply.Value = record.Value
 		reply.Version = rpc.Tversion(record.Version)
+		reply.Err = rpc.OK
 	} else {
 		reply.Err = rpc.ErrNoKey
 	}
@@ -52,7 +53,26 @@ func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 // If the key doesn't exist, Put installs the value if the
 // args.Version is 0, and returns ErrNoKey otherwise.
 func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
-	// Your code here.
+	record, ok := kv.data[args.Key]
+	if ok {
+		if record.Version == rpc.Tversion(args.Version) {
+			record.Value = args.Value
+			record.Version = args.Version + 1
+			reply.Err = rpc.OK
+		} else {
+			reply.Err = rpc.ErrVersion
+		}
+	} else {
+		if args.Version == 0 {
+			kv.data[args.Key] = &Record{
+				Value:   args.Value,
+				Version: 1,
+			}
+			reply.Err = rpc.OK
+		} else {
+			reply.Err = rpc.ErrNoKey
+		}
+	}
 }
 
 // You can ignore Kill() for this lab
