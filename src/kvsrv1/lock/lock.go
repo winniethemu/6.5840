@@ -1,7 +1,10 @@
 package lock
 
 import (
-	"6.5840/kvtest1"
+	"time"
+
+	"6.5840/kvsrv1/rpc"
+	kvtest "6.5840/kvtest1"
 )
 
 type Lock struct {
@@ -10,7 +13,10 @@ type Lock struct {
 	// Put and Get.  The tester passes the clerk in when calling
 	// MakeLock().
 	ck kvtest.IKVClerk
-	// You may add code here
+
+	// Lock state
+	owner string
+	key   string
 }
 
 // The tester calls MakeLock() and passes in a k/v clerk; your code can
@@ -19,15 +25,51 @@ type Lock struct {
 // Use l as the key to store the "lock state" (you would have to decide
 // precisely what the lock state is).
 func MakeLock(ck kvtest.IKVClerk, l string) *Lock {
-	lk := &Lock{ck: ck}
-	// You may add code here
+	id := kvtest.RandValue(8)
+	lk := &Lock{ck: ck, owner: id, key: l}
 	return lk
 }
 
 func (lk *Lock) Acquire() {
-	// Your code here
+	for {
+		val, ver, err := lk.ck.Get(lk.key)
+		if err == rpc.ErrNoKey {
+			res := lk.ck.Put(lk.key, lk.owner, 0)
+			if res == rpc.OK {
+				return
+			}
+		}
+		if val == "" {
+			res := lk.ck.Put(lk.key, lk.owner, ver)
+			if res == rpc.OK {
+				return
+			}
+		}
+
+		// in case res is rpc.ErrMaybe
+		if val == lk.owner {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func (lk *Lock) Release() {
-	// Your code here
+	for {
+		val, ver, err := lk.ck.Get(lk.key)
+
+		// in case res was rpc.ErrMaybe
+		if err == rpc.ErrNoKey || val == "" {
+			return
+		}
+
+		if val == lk.owner {
+			res := lk.ck.Put(lk.key, "", ver)
+			if res == rpc.OK {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
