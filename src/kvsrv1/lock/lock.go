@@ -45,6 +45,12 @@ func (lk *Lock) Acquire() {
 				return
 			}
 		}
+
+		// in case res is rpc.ErrMaybe
+		if val == lk.owner {
+			return
+		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
 }
@@ -52,9 +58,12 @@ func (lk *Lock) Acquire() {
 func (lk *Lock) Release() {
 	for {
 		val, ver, err := lk.ck.Get(lk.key)
+
+		// in case res was rpc.ErrMaybe
 		if err == rpc.ErrNoKey || val == "" {
-			panic("cannot release an empty lock")
+			return
 		}
+
 		if val == lk.owner {
 			res := lk.ck.Put(lk.key, "", ver)
 			if res == rpc.OK {
