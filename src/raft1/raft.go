@@ -21,9 +21,9 @@ import (
 type State string
 
 const (
-	CANDIDATE State = "candidate"
-	FOLLOWER  State = "follower"
-	LEADER    State = "leader"
+	Candidate State = "Candidate"
+	Follower  State = "Follower"
+	Leader    State = "Leader"
 )
 
 // A Go object implementing a single Raft peer.
@@ -120,9 +120,9 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 
 }
 
-func (rf *Raft) BecomeFollower(term int) {
+func (rf *Raft) becomeFollower(term int) {
 	DPrintf("Becoming follower: peer=%d, term=%d", rf.me, term)
-	rf.currentState = FOLLOWER
+	rf.currentState = Follower
 	rf.currentTerm = term
 	rf.votedFor = -1
 	rf.electionReset = time.Now()
@@ -173,7 +173,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			args.Term,
 		)
 		rf.currentTerm = args.Term
-		rf.BecomeFollower(args.Term)
+		rf.becomeFollower(args.Term)
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = false
 		return
@@ -329,7 +329,7 @@ func Make(
 	rf.me = me
 
 	// Your initialization code here (3A, 3B, 3C).
-	rf.currentState = FOLLOWER
+	rf.currentState = Follower
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
