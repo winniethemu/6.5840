@@ -18,6 +18,14 @@ import (
 	tester "6.5840/tester1"
 )
 
+type State string
+
+const (
+	CANDIDATE State = "candidate"
+	FOLLOWER  State = "follower"
+	LEADER    State = "leader"
+)
+
 // A Go object implementing a single Raft peer.
 type Raft struct {
 	mu        sync.Mutex          // Lock to protect shared access to this peer's state
@@ -29,7 +37,8 @@ type Raft struct {
 	// Your data here (3A, 3B, 3C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
-	lastHeartbeat time.Time
+	currentState  State
+	electionReset time.Time
 
 	// Persistent
 	currentTerm int
@@ -37,12 +46,12 @@ type Raft struct {
 	logs        []LogEntry
 
 	// Volatile
-	commitIndex int
-	lastApplied int
+	// commitIndex int
+	// lastApplied int
 
 	// For leaders
-	nextIndex  []int
-	matchIndex []int
+	// nextIndex  []int
+	// matchIndex []int
 }
 
 type LogEntry struct {
@@ -50,12 +59,11 @@ type LogEntry struct {
 
 // return currentTerm and whether this server believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
-	var term int
 	var isleader bool
 
 	// Your code here (3A).
 
-	return term, isleader
+	return rf.currentTerm, isleader
 }
 
 // save Raft's persistent state to stable storage,
@@ -112,6 +120,15 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 
 }
 
+func (rf *Raft) BecomeFollower(term int) {
+	DPrintf("Becoming follower: peer=%d, term=%d", rf.me, term)
+	rf.currentState = FOLLOWER
+	rf.currentTerm = term
+	rf.votedFor = -1
+	rf.electionReset = time.Now()
+	rf.persist()
+}
+
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
 type RequestVoteArgs struct {
@@ -137,18 +154,39 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	defer rf.mu.Unlock()
 
 	if args.Term < rf.currentTerm {
+		DPrintf("Received outdated RequestVote: receiver=%d, term=%d, requester=%d, term=%d\n",
+			rf.me,
+			rf.currentTerm,
+			args.CandidateID,
+			args.Term,
+		)
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = false
 		return
 	}
 
-	if rf.votedFor == -1 || (rf.votedFor == args.CandidateID) {
-		reply.Term = args.Term
-		reply.VoteGranted = true
+	if args.Term > rf.currentTerm {
+		DPrintf("Term out of date in RequestVote: receiver=%d, term=%d, requester=%d, term=%d\n",
+			rf.me,
+			rf.currentTerm,
+			args.CandidateID,
+			args.Term,
+		)
+		rf.currentTerm = args.Term
+		rf.BecomeFollower(args.Term)
+		reply.Term = rf.currentTerm
+		reply.VoteGranted = false
 		return
 	}
 
-	rf.currentTerm = args.Term
+	// TODO: Receiver implementation criterion 2
+	if rf.votedFor == -1 || rf.votedFor == args.CandidateID {
+		reply.Term = args.Term
+		reply.VoteGranted = true
+		rf.votedFor = args.CandidateID
+		return
+	}
+
 	reply.Term = args.Term
 	reply.VoteGranted = false
 }
@@ -230,7 +268,7 @@ func (rf *Raft) ticker() {
 	for !rf.killed() {
 		// Your code here (3A)
 		// Check if a leader election should be started.
-		prevTime := rf.lastHeartbeat
+		prevTime := rf.electionReset
 
 		// pause for a random amount of time between 300 and 500
 		// milliseconds.
@@ -238,7 +276,7 @@ func (rf *Raft) ticker() {
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 
 		// Election timeout
-		if res := prevTime.Equal(rf.lastHeartbeat); res {
+		if res := prevTime.Equal(rf.electionReset); res {
 			rf.startElection()
 		}
 	}
@@ -290,6 +328,7 @@ func Make(
 	rf.me = me
 
 	// Your initialization code here (3A, 3B, 3C).
+	rf.currentState = FOLLOWER
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
