@@ -184,6 +184,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.Term = args.Term
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateID
+		rf.persist()
 		return
 	}
 
