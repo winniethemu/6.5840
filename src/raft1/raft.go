@@ -7,7 +7,6 @@ package raft
 // Make() creates a new raft peer that implements the raft interface.
 
 import (
-	//	"bytes"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -30,15 +29,32 @@ type Raft struct {
 	// Your data here (3A, 3B, 3C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
+	lastHeartbeat time.Time
+
+	// Persistent
+	currentTerm int
+	votedFor    int
+	logs        []LogEntry
+
+	// Volatile
+	commitIndex int
+	lastApplied int
+
+	// For leaders
+	nextIndex  []int
+	matchIndex []int
 }
 
-// return currentTerm and whether this server
-// believes it is the leader.
-func (rf *Raft) GetState() (int, bool) {
+type LogEntry struct {
+}
 
+// return currentTerm and whether this server believes it is the leader.
+func (rf *Raft) GetState() (int, bool) {
 	var term int
 	var isleader bool
+
 	// Your code here (3A).
+
 	return term, isleader
 }
 
@@ -100,17 +116,41 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 // field names must start with capital letters!
 type RequestVoteArgs struct {
 	// Your data here (3A, 3B).
+	Term         int
+	CandidateID  int
+	LastLogIndex int
+	LastLogTerm  int
 }
 
 // example RequestVote RPC reply structure.
 // field names must start with capital letters!
 type RequestVoteReply struct {
 	// Your data here (3A).
+	Term        int
+	VoteGranted bool
 }
 
 // example RequestVote RPC handler.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (3A, 3B).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	if args.Term < rf.currentTerm {
+		reply.Term = rf.currentTerm
+		reply.VoteGranted = false
+		return
+	}
+
+	if rf.votedFor == -1 || (rf.votedFor == args.CandidateID) {
+		reply.Term = args.Term
+		reply.VoteGranted = true
+		return
+	}
+
+	rf.currentTerm = args.Term
+	reply.Term = args.Term
+	reply.VoteGranted = false
 }
 
 // example code to send a RequestVote RPC to a server.
@@ -190,11 +230,42 @@ func (rf *Raft) ticker() {
 	for !rf.killed() {
 		// Your code here (3A)
 		// Check if a leader election should be started.
+		prevTime := rf.lastHeartbeat
 
-		// pause for a random amount of time between 50 and 350
+		// pause for a random amount of time between 300 and 500
 		// milliseconds.
-		ms := 50 + (rand.Int63() % 300)
+		ms := 300 + (rand.Int63() % 200)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
+
+		// Election timeout
+		if res := prevTime.Equal(rf.lastHeartbeat); res {
+			rf.startElection()
+		}
+	}
+}
+
+func (rf *Raft) startElection() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	rf.votedFor = rf.me
+	rf.currentTerm++
+	cachedTerm := rf.currentTerm
+
+	for idx := range rf.peers {
+		go func(peerID int) {
+			if idx != rf.me {
+				args := RequestVoteArgs{
+					Term:        cachedTerm,
+					CandidateID: rf.me,
+					// TODO: LastLogIndex
+					// TODO: LastLogTerm
+				}
+				reply := RequestVoteReply{}
+				// TODO: handle response
+				rf.sendRequestVote(idx, &args, &reply)
+			}
+		}(idx)
 	}
 }
 
