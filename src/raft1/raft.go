@@ -37,8 +37,6 @@ type Raft struct {
 	// Your data here (3A, 3B, 3C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
-	currentState  State
-	electionReset time.Time
 
 	// Persistent
 	currentTerm int
@@ -48,6 +46,8 @@ type Raft struct {
 	// Volatile
 	// commitIndex int
 	// lastApplied int
+	currentState  State
+	electionReset time.Time
 
 	// For leaders
 	// nextIndex  []int
@@ -121,12 +121,14 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 }
 
 func (rf *Raft) becomeFollower(term int) {
-	DPrintf("Becoming follower: peer=%d, term=%d", rf.me, term)
+	DPrintf("becoming follower: peer=%d, term=%d\n", rf.me, term)
 	rf.currentState = Follower
 	rf.currentTerm = term
 	rf.votedFor = -1
 	rf.electionReset = time.Now()
 	rf.persist()
+
+	go rf.ticker()
 }
 
 // example RequestVote RPC arguments structure.
@@ -154,7 +156,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	defer rf.mu.Unlock()
 
 	if args.Term < rf.currentTerm {
-		DPrintf("Received outdated RequestVote: receiver=%d, term=%d, requester=%d, term=%d\n",
+		DPrintf("received outdated RequestVote: receiver=%d, term=%d, requester=%d, term=%d\n",
 			rf.me,
 			rf.currentTerm,
 			args.CandidateID,
@@ -166,7 +168,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	if args.Term > rf.currentTerm {
-		DPrintf("Term out of date in RequestVote: receiver=%d, term=%d, requester=%d, term=%d\n",
+		DPrintf("term out of date in RequestVote: receiver=%d, term=%d, requester=%d, term=%d\n",
 			rf.me,
 			rf.currentTerm,
 			args.CandidateID,
@@ -269,27 +271,38 @@ func (rf *Raft) ticker() {
 	for !rf.killed() {
 		// Your code here (3A)
 		// Check if a leader election should be started.
-		prevTime := rf.electionReset
+		rf.mu.Lock()
+		if rf.currentState == Leader {
+			DPrintf("bailing out of election timer, currentState=%v\n", rf.currentState)
+			rf.mu.Unlock()
+			return
+		}
 
 		// pause for a random amount of time between 300 and 500
 		// milliseconds.
 		ms := 300 + (rand.Int63() % 200)
-		time.Sleep(time.Duration(ms) * time.Millisecond)
+		duration := time.Duration(ms) * time.Millisecond
+		time.Sleep(duration)
 
 		// Election timeout
-		if res := prevTime.Equal(rf.electionReset); res {
+		rf.mu.Lock()
+		if elapsed := time.Since(rf.electionReset); elapsed >= duration {
 			rf.startElection()
 		}
+		rf.mu.Unlock()
 	}
 }
 
+// expects rf.mu to be locked
 func (rf *Raft) startElection() {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	rf.votedFor = rf.me
+	rf.currentState = Candidate
 	rf.currentTerm++
+	rf.votedFor = rf.me
+	rf.electionReset = time.Now()
 	cachedTerm := rf.currentTerm
+	DPrintf("becoming candidate: peer=%d, term=%d\n", rf.me, cachedTerm)
+
+	votesReceived := 1
 
 	for idx := range rf.peers {
 		go func(peerID int) {
@@ -301,11 +314,43 @@ func (rf *Raft) startElection() {
 					// TODO: LastLogTerm
 				}
 				reply := RequestVoteReply{}
-				// TODO: handle response
-				rf.sendRequestVote(idx, &args, &reply)
+				if ok := rf.sendRequestVote(idx, &args, &reply); !ok {
+					return
+				}
+				rf.mu.Lock()
+				defer rf.mu.Unlock()
+				if rf.currentState != Candidate {
+					DPrintf(
+						"candidate state change while waiting for reply: peer=%d, currentState=%v\n",
+						rf.me,
+						rf.currentState,
+					)
+					return
+				}
+				if rf.currentTerm < reply.Term {
+					DPrintf("term out of date in RequestVoteReply, becoming follower: peer=%d\n", rf.me)
+					rf.becomeFollower(reply.Term)
+				} else if rf.currentTerm == reply.Term {
+					if reply.VoteGranted {
+						votesReceived++
+						if votesReceived*2 > len(rf.peers)+1 {
+							DPrintf(
+								"winning election: peer=%d, term=%d, votesReceived=%d\n",
+								rf.me,
+								rf.currentTerm,
+								votesReceived,
+							)
+							// TODO: start leader
+							return
+						}
+					}
+				}
 			}
 		}(idx)
 	}
+
+	// Run another election timer in case this election was unsuccessful
+	// go rf.ticker()
 }
 
 // the service or tester wants to create a Raft server. the ports
