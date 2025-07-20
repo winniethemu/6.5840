@@ -55,6 +55,8 @@ type Raft struct {
 }
 
 type LogEntry struct {
+	Command any
+	Term    int
 }
 
 // return currentTerm and whether this server believes it is the leader.
@@ -151,6 +153,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	if rf.killed() {
+		return
+	}
+
 	if args.Term < rf.currentTerm {
 		DPrintf("received outdated RequestVote: receiver=%d, term=%d, requester=%d, term=%d\n",
 			rf.me,
@@ -237,6 +243,32 @@ type AppendEntriesReply struct {
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	if rf.killed() {
+		return
+	}
+
+	if rf.currentTerm < args.Term {
+		DPrintf(
+			"term out of date in AppendEntries, becoming follower: peer=%d\n",
+			rf.me,
+		)
+		rf.becomeFollower(args.Term)
+	}
+
+	reply.Success = false
+	if rf.currentTerm == args.Term {
+		// Candidate finds out that another peer has won the election for this term
+		if rf.currentState != Follower {
+			rf.becomeFollower(args.Term)
+		}
+		rf.electionReset = time.Now()
+		reply.Success = true
+	}
+
+	reply.Term = rf.currentTerm
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
