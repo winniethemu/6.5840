@@ -59,11 +59,8 @@ type LogEntry struct {
 
 // return currentTerm and whether this server believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
-	var isleader bool
-
 	// Your code here (3A).
-
-	return rf.currentTerm, isleader
+	return rf.currentTerm, rf.currentState == Leader
 }
 
 // save Raft's persistent state to stable storage,
@@ -117,7 +114,6 @@ func (rf *Raft) PersistBytes() int {
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (3D).
-
 }
 
 func (rf *Raft) becomeFollower(term int) {
@@ -267,30 +263,27 @@ func (rf *Raft) killed() bool {
 	return z == 1
 }
 
-func (rf *Raft) ticker() {
-	for !rf.killed() {
-		// Your code here (3A)
-		// Check if a leader election should be started.
+func (rf *Raft) startLeader() {
+	DPrintf("becoming leader: peer=%d, term=%d\n", rf.me, rf.currentTerm)
+	rf.currentState = Leader
+	rf.votedFor = -1
+	rf.persist()
+
+	go func() {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			rf.sendHeartbeat()
+			<-ticker.C
 		rf.mu.Lock()
-		if rf.currentState == Leader {
-			DPrintf("bailing out of election timer, currentState=%v\n", rf.currentState)
+			if rf.currentState != Leader {
 			rf.mu.Unlock()
 			return
 		}
-
-		// pause for a random amount of time between 300 and 500
-		// milliseconds.
-		ms := 300 + (rand.Int63() % 200)
-		duration := time.Duration(ms) * time.Millisecond
-		time.Sleep(duration)
-
-		// Election timeout
-		rf.mu.Lock()
-		if elapsed := time.Since(rf.electionReset); elapsed >= duration {
-			rf.startElection()
-		}
 		rf.mu.Unlock()
 	}
+	}()
 }
 
 // expects rf.mu to be locked
@@ -340,7 +333,7 @@ func (rf *Raft) startElection() {
 								rf.currentTerm,
 								votesReceived,
 							)
-							// TODO: start leader
+							rf.startLeader()
 							return
 						}
 					}
@@ -351,6 +344,32 @@ func (rf *Raft) startElection() {
 
 	// Run another election timer in case this election was unsuccessful
 	// go rf.ticker()
+}
+
+func (rf *Raft) ticker() {
+	for !rf.killed() {
+		// Your code here (3A)
+		// Check if a leader election should be started.
+		rf.mu.Lock()
+		if rf.currentState == Leader {
+			DPrintf("bailing out of election timer, currentState=%v\n", rf.currentState)
+			rf.mu.Unlock()
+			return
+		}
+
+		// pause for a random amount of time between 300 and 500
+		// milliseconds.
+		ms := 300 + (rand.Int63() % 200)
+		duration := time.Duration(ms) * time.Millisecond
+		time.Sleep(duration)
+
+		// Election timeout
+		rf.mu.Lock()
+		if elapsed := time.Since(rf.electionReset); elapsed >= duration {
+			rf.startElection()
+		}
+		rf.mu.Unlock()
+	}
 }
 
 // the service or tester wants to create a Raft server. the ports
@@ -374,7 +393,10 @@ func Make(
 	rf.me = me
 
 	// Your initialization code here (3A, 3B, 3C).
+	rf.currentTerm = 1
 	rf.currentState = Follower
+	rf.votedFor = -1
+	rf.electionReset = time.Now()
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
