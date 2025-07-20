@@ -222,6 +222,60 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok
 }
 
+type AppendEntriesArgs struct {
+	Term     int
+	LeaderID int
+	// PrevLogIndex int
+	// PrevLogTerm  int
+	Entries []LogEntry
+	// LeaderCommit int
+}
+
+type AppendEntriesReply struct {
+	Term    int
+	Success bool
+}
+
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+}
+
+func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	return ok
+}
+
+func (rf *Raft) sendHeartbeat() {
+	rf.mu.Lock()
+	cachedTerm := rf.currentTerm
+	rf.mu.Unlock()
+
+	for idx := range rf.peers {
+		if idx == rf.me {
+			continue
+		}
+		go func() {
+			args := AppendEntriesArgs{
+				Term:     cachedTerm,
+				LeaderID: rf.me,
+				Entries:  []LogEntry{},
+			}
+			reply := AppendEntriesReply{}
+			if ok := rf.sendAppendEntries(idx, &args, &reply); !ok {
+				return
+			}
+			rf.mu.Lock()
+			defer rf.mu.Unlock()
+			if cachedTerm < reply.Term {
+				DPrintf(
+					"term out of date in AppendEntries, becoming follower: peer=%d\n",
+					rf.me,
+				)
+				rf.becomeFollower(reply.Term)
+			}
+		}()
+	}
+}
+
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
 // server isn't the leader, returns false. otherwise start the
@@ -276,13 +330,13 @@ func (rf *Raft) startLeader() {
 		for {
 			rf.sendHeartbeat()
 			<-ticker.C
-		rf.mu.Lock()
+			rf.mu.Lock()
 			if rf.currentState != Leader {
+				rf.mu.Unlock()
+				return
+			}
 			rf.mu.Unlock()
-			return
 		}
-		rf.mu.Unlock()
-	}
 	}()
 }
 
