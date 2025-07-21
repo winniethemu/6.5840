@@ -450,7 +450,6 @@ func (rf *Raft) ticker() {
 		time.Sleep(duration)
 
 		// Election timeout
-		rf.mu.Lock()
 		if elapsed := time.Since(rf.electionReset); elapsed >= duration {
 			rf.startElection()
 		}
