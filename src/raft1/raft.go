@@ -162,7 +162,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	if args.Term < rf.currentTerm {
-		DPrintf("received outdated RequestVote: receiver=%d, term=%d, requester=%d, term=%d\n",
+		DPrintf("stale RequestVote: receiver=%d, term=%d, requester=%d, term=%d\n",
 			rf.me,
 			rf.currentTerm,
 			args.CandidateID,
@@ -174,7 +174,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	if args.Term > rf.currentTerm {
-		DPrintf("term out of date in RequestVote: receiver=%d, term=%d, requester=%d, term=%d\n",
+		DPrintf("newer RequestVote: receiver=%d, term=%d, requester=%d, term=%d\n",
 			rf.me,
 			rf.currentTerm,
 			args.CandidateID,
@@ -412,7 +412,7 @@ func (rf *Raft) startElection() {
 				} else if rf.currentTerm == reply.Term {
 					if reply.VoteGranted {
 						votesReceived++
-						if votesReceived*2 > len(rf.peers)+1 {
+						if votesReceived > len(rf.peers)/2 {
 							DPrintf(
 								"winning election: peer=%d, term=%d, votesReceived=%d\n",
 								rf.me,
@@ -429,7 +429,7 @@ func (rf *Raft) startElection() {
 	}
 
 	// Run another election timer in case this election was unsuccessful
-	// go rf.ticker()
+	go rf.ticker()
 }
 
 func (rf *Raft) ticker() {
