@@ -11,7 +11,7 @@ import (
 
 	"6.5840/labrpc"
 	"6.5840/raftapi"
-	"6.5840/tester1"
+	tester "6.5840/tester1"
 )
 
 type Test struct {
@@ -95,7 +95,7 @@ func (ts *Test) checkOneLeader() int {
 			return leaders[lastTermWithLeader][0]
 		}
 	}
-	details := fmt.Sprintf("unable to find a leader")
+	details := "unable to find a leader"
 	tester.AnnotateCheckerFailure("no leader", details)
 	ts.Fatalf("expected one leader, got none")
 	return -1
