@@ -180,15 +180,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			args.CandidateID,
 			args.Term,
 		)
-		rf.currentTerm = args.Term
 		rf.becomeFollower(args.Term)
-		reply.Term = rf.currentTerm
-		reply.VoteGranted = false
-		return
 	}
 
 	// TODO: Receiver implementation criterion 2
-	if rf.votedFor == -1 || rf.votedFor == args.CandidateID {
+	if rf.currentTerm == args.Term && (rf.votedFor == -1 || rf.votedFor == args.CandidateID) {
 		reply.Term = args.Term
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateID
@@ -360,7 +356,7 @@ func (rf *Raft) startLeader() {
 	rf.persist()
 
 	go func() {
-		ticker := time.NewTicker(100 * time.Millisecond)
+		ticker := time.NewTicker(10 * time.Millisecond)
 		defer ticker.Stop()
 
 		for {
@@ -437,6 +433,10 @@ func (rf *Raft) startElection() {
 }
 
 func (rf *Raft) ticker() {
+	// Generate random election timeout between 300-500ms
+	ms := 200 + (rand.Int63() % 300)
+	electionTimeout := time.Duration(ms) * time.Millisecond
+
 	for !rf.killed() {
 		// Your code here (3A)
 		// Check if a leader election should be started.
@@ -447,15 +447,16 @@ func (rf *Raft) ticker() {
 			return
 		}
 
-		// pause for a random amount of time between 300 and 500
-		// milliseconds.
-		ms := 300 + (rand.Int63() % 200)
-		duration := time.Duration(ms) * time.Millisecond
-		time.Sleep(duration)
+		// Sleep for a short interval before checking again
+		time.Sleep(10 * time.Millisecond)
 
-		// Election timeout
-		if elapsed := time.Since(rf.electionReset); elapsed >= duration {
+		// Check if election timeout has occurred
+		if elapsed := time.Since(rf.electionReset); elapsed >= electionTimeout {
+			DPrintf("election timeout occurred: peer=%d, elapsed=%v, timeout=%v\n",
+				rf.me, elapsed, electionTimeout)
 			rf.startElection()
+			rf.mu.Unlock()
+			return
 		}
 		rf.mu.Unlock()
 	}
