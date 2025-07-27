@@ -356,7 +356,7 @@ func (rf *Raft) startLeader() {
 	rf.persist()
 
 	go func() {
-		ticker := time.NewTicker(10 * time.Millisecond)
+		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 
 		for {
@@ -433,7 +433,7 @@ func (rf *Raft) startElection() {
 }
 
 func (rf *Raft) ticker() {
-	// Generate random election timeout between 300-500ms
+	// Generate random election timeout between 200-500ms
 	ms := 200 + (rand.Int63() % 300)
 	electionTimeout := time.Duration(ms) * time.Millisecond
 
