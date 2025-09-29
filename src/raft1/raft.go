@@ -320,14 +320,20 @@ func (rf *Raft) sendHeartbeat() {
 // if it's ever committed. the second return value is the current
 // term. the third return value is true if this server believes it is
 // the leader.
-func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
-	isLeader := true
+func (rf *Raft) Start(command any) (int, int, bool) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	index := len(rf.logs) + 1
+	term := rf.currentTerm
+	isLeader := rf.currentState == Leader
 
 	// Your code here (3B).
-
-	return index, term, isLeader
+	if !isLeader {
+		return -1, -1, false
+	}
+	rf.logs = append(rf.logs, LogEntry{Command: command, Term: term})
+	return index, term, true
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
@@ -487,6 +493,13 @@ func Make(
 	rf.currentState = Follower
 	rf.votedFor = -1
 	rf.electionReset = time.Now()
+
+	// Raft log is 1-indexed, but we view it as 0-indexed. This allows the
+	// very first AppendEntries to contain 0 as `PrevLogIndex`, and be a
+	// valid index into the log.
+	rf.logs = []LogEntry{
+		{Command: nil, Term: 0},
+	}
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())

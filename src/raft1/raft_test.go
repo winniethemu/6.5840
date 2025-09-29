@@ -141,6 +141,7 @@ func TestBasicAgree3B(t *testing.T) {
 
 	iters := 3
 	for index := 1; index < iters+1; index++ {
+		// check num of servers think this index is committed
 		nd, _ := ts.nCommitted(index)
 		if nd > 0 {
 			t.Fatalf("some have committed before Start()")
