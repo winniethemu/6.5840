@@ -89,7 +89,7 @@ func (rf *Raft) persist() {
 
 // restore previously persisted state.
 func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
+	if len(data) < 1 { // bootstrap without any state?
 		return
 	}
 	// Your code here (3C).
@@ -229,12 +229,12 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 }
 
 type AppendEntriesArgs struct {
-	Term     int
-	LeaderID int
-	// PrevLogIndex int
-	// PrevLogTerm  int
-	Entries []LogEntry
-	// LeaderCommit int
+	Term         int
+	LeaderID     int
+	PrevLogIndex int
+	PrevLogTerm  int
+	Entries      []LogEntry
+	LeaderCommit int
 }
 
 type AppendEntriesReply struct {
@@ -258,16 +258,19 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.becomeFollower(args.Term)
 	}
 
-	reply.Success = false
-	if rf.currentTerm == args.Term {
-		// Candidate finds out that another peer has won the election for this term
-		if rf.currentState != Follower {
-			rf.becomeFollower(args.Term)
-		}
-		rf.electionReset = time.Now()
-		reply.Success = true
+	if rf.currentTerm > args.Term {
+		reply.Success = false
+		reply.Term = rf.currentTerm
+		return
 	}
 
+	// Candidate finds out that another peer has won the election for this term
+	if rf.currentState != Follower {
+		rf.becomeFollower(args.Term)
+	}
+	rf.electionReset = time.Now()
+
+	reply.Success = true
 	reply.Term = rf.currentTerm
 }
 
