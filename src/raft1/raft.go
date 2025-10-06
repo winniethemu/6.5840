@@ -37,6 +37,7 @@ type Raft struct {
 	// Your data here (3A, 3B, 3C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
+	applyCh chan raftapi.ApplyMsg
 
 	// Persistent
 	currentTerm int
@@ -44,8 +45,8 @@ type Raft struct {
 	logs        []LogEntry
 
 	// Volatile
-	// commitIndex int
-	// lastApplied int
+	commitIndex   int
+	lastApplied   int
 	currentState  State
 	electionReset time.Time
 
@@ -270,6 +271,19 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 	rf.electionReset = time.Now()
 
+	if len(rf.logs) <= args.PrevLogIndex || rf.logs[args.PrevLogIndex].Term != args.PrevLogTerm {
+		reply.Success = false
+		reply.Term = rf.currentTerm
+		return
+	}
+
+	rf.logs = rf.logs[:args.PrevLogIndex+1]
+	rf.logs = append(rf.logs, args.Entries...)
+
+	if args.LeaderCommit > rf.commitIndex {
+		rf.commitIndex = min(args.LeaderCommit, len(rf.logs)-1)
+	}
+
 	reply.Success = true
 	reply.Term = rf.currentTerm
 }
@@ -282,6 +296,9 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 func (rf *Raft) sendHeartbeat() {
 	rf.mu.Lock()
 	cachedTerm := rf.currentTerm
+	prevLogIndex := len(rf.logs) - 1
+	prevLogTerm := rf.logs[prevLogIndex].Term
+	leaderCommit := rf.commitIndex
 	rf.mu.Unlock()
 
 	for idx := range rf.peers {
@@ -290,9 +307,12 @@ func (rf *Raft) sendHeartbeat() {
 		}
 		go func() {
 			args := AppendEntriesArgs{
-				Term:     cachedTerm,
-				LeaderID: rf.me,
-				Entries:  []LogEntry{},
+				Term:         cachedTerm,
+				LeaderID:     rf.me,
+				PrevLogIndex: prevLogIndex,
+				PrevLogTerm:  prevLogTerm,
+				Entries:      []LogEntry{},
+				LeaderCommit: leaderCommit,
 			}
 			reply := AppendEntriesReply{}
 			if ok := rf.sendAppendEntries(idx, &args, &reply); !ok {
@@ -327,7 +347,7 @@ func (rf *Raft) Start(command any) (int, int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	index := len(rf.logs) + 1
+	index := len(rf.logs)
 	term := rf.currentTerm
 	isLeader := rf.currentState == Leader
 
@@ -335,7 +355,30 @@ func (rf *Raft) Start(command any) (int, int, bool) {
 	if !isLeader {
 		return -1, -1, false
 	}
+
 	rf.logs = append(rf.logs, LogEntry{Command: command, Term: term})
+	rf.commitIndex = index
+	for idx := range rf.peers {
+		if idx == rf.me {
+			continue
+		}
+
+		go func(peer int) {
+			rf.mu.Lock()
+			args := AppendEntriesArgs{
+				Term:         term,
+				LeaderID:     rf.me,
+				PrevLogIndex: index - 1,
+				PrevLogTerm:  rf.logs[index-1].Term,
+				Entries:      rf.logs[index:],
+				LeaderCommit: rf.commitIndex,
+			}
+			reply := AppendEntriesReply{}
+			rf.mu.Unlock()
+			rf.sendAppendEntries(peer, &args, &reply)
+		}(idx)
+	}
+
 	return index, term, true
 }
 
@@ -471,6 +514,24 @@ func (rf *Raft) ticker() {
 	}
 }
 
+func (rf *Raft) applier() {
+	for !rf.killed() {
+		rf.mu.Lock()
+		for rf.lastApplied < rf.commitIndex && rf.lastApplied < len(rf.logs) {
+			rf.lastApplied++
+			entry := rf.logs[rf.lastApplied]
+			message := raftapi.ApplyMsg{
+				CommandValid: true,
+				Command:      entry.Command,
+				CommandIndex: rf.lastApplied,
+			}
+			rf.applyCh <- message
+		}
+		rf.mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
 // server's port is peers[me]. all the servers' peers[] arrays
@@ -496,6 +557,9 @@ func Make(
 	rf.currentState = Follower
 	rf.votedFor = -1
 	rf.electionReset = time.Now()
+	rf.commitIndex = 0
+	rf.lastApplied = 0
+	rf.applyCh = applyCh
 
 	// Raft log is 1-indexed, but we view it as 0-indexed. This allows the
 	// very first AppendEntries to contain 0 as `PrevLogIndex`, and be a
@@ -509,6 +573,8 @@ func Make(
 
 	// start ticker goroutine to start elections
 	go rf.ticker()
+
+	go rf.applier()
 
 	return rf
 }
