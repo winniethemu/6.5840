@@ -316,6 +316,10 @@ func (rf *Raft) sendHeartbeat() {
 			continue
 		}
 		go func() {
+			if rf.killed() {
+				return
+			}
+			rf.mu.Lock()
 			args := AppendEntriesArgs{
 				Term:         cachedTerm,
 				LeaderID:     rf.me,
@@ -324,10 +328,16 @@ func (rf *Raft) sendHeartbeat() {
 				Entries:      []LogEntry{},
 				LeaderCommit: leaderCommit,
 			}
+			rf.mu.Unlock()
 			reply := AppendEntriesReply{}
 			if ok := rf.sendAppendEntries(idx, &args, &reply); !ok {
 				return
 			}
+
+			if rf.killed() {
+				return
+			}
+
 			rf.mu.Lock()
 			defer rf.mu.Unlock()
 			if cachedTerm < reply.Term {
@@ -373,6 +383,10 @@ func (rf *Raft) Start(command any) (int, int, bool) {
 		}
 
 		go func(peer int) {
+			if rf.killed() {
+				return
+			}
+
 			rf.mu.Lock()
 
 			ni := rf.nextIndex[peer]
@@ -388,8 +402,8 @@ func (rf *Raft) Start(command any) (int, int, bool) {
 				Entries:      entries,
 				LeaderCommit: rf.commitIndex,
 			}
-			reply := AppendEntriesReply{}
 			rf.mu.Unlock()
+			reply := AppendEntriesReply{}
 			DPrintf(
 				"sending AppendEntries for agreement: leader=%d, peer=%d, req=%+v",
 				rf.me,
@@ -399,6 +413,10 @@ func (rf *Raft) Start(command any) (int, int, bool) {
 			if ok := rf.sendAppendEntries(peer, &args, &reply); ok {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
+
+				if rf.killed() {
+					return
+				}
 
 				// stale response
 				if rf.currentState == Leader && reply.Term != args.Term {
@@ -420,7 +438,7 @@ func (rf *Raft) Start(command any) (int, int, bool) {
 								matchCount++
 							}
 						}
-						if matchCount*2 > len(rf.peers) {
+						if matchCount >= len(rf.peers)/2+1 {
 							rf.commitIndex = i
 						}
 					}
@@ -490,6 +508,10 @@ func (rf *Raft) startElection() {
 	for idx := range rf.peers {
 		go func(peerID int) {
 			if idx != rf.me {
+				if rf.killed() {
+					return
+				}
+
 				rf.mu.Lock()
 				lastLogIndex := -1
 				lastLogTerm := -1
@@ -497,19 +519,24 @@ func (rf *Raft) startElection() {
 					lastLogIndex = len(rf.logs) - 1
 					lastLogTerm = rf.logs[lastLogIndex].Term
 				}
-				rf.mu.Unlock()
 				args := RequestVoteArgs{
 					Term:         cachedTerm,
 					CandidateID:  rf.me,
 					LastLogIndex: lastLogIndex,
 					LastLogTerm:  lastLogTerm,
 				}
+				rf.mu.Unlock()
 				reply := RequestVoteReply{}
 				if ok := rf.sendRequestVote(idx, &args, &reply); !ok {
 					return
 				}
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
+
+				if rf.killed() {
+					return
+				}
+
 				if rf.currentState != Candidate {
 					DPrintf(
 						"candidate state change while waiting for reply: peer=%d, currentState=%v\n",
