@@ -51,8 +51,8 @@ type Raft struct {
 	electionReset time.Time
 
 	// For leaders
-	// nextIndex  []int
-	// matchIndex []int
+	nextIndex  []int
+	matchIndex []int
 }
 
 type LogEntry struct {
@@ -357,7 +357,6 @@ func (rf *Raft) Start(command any) (int, int, bool) {
 	}
 
 	rf.logs = append(rf.logs, LogEntry{Command: command, Term: term})
-	rf.commitIndex = index
 	for idx := range rf.peers {
 		if idx == rf.me {
 			continue
@@ -365,17 +364,60 @@ func (rf *Raft) Start(command any) (int, int, bool) {
 
 		go func(peer int) {
 			rf.mu.Lock()
+
+			ni := rf.nextIndex[peer]
+			prevLogIndex := ni - 1
+			prevLogTerm := rf.logs[prevLogIndex].Term
+			entries := rf.logs[ni:]
+
 			args := AppendEntriesArgs{
 				Term:         term,
 				LeaderID:     rf.me,
-				PrevLogIndex: index - 1,
-				PrevLogTerm:  rf.logs[index-1].Term,
-				Entries:      rf.logs[index:],
+				PrevLogIndex: prevLogIndex,
+				PrevLogTerm:  prevLogTerm,
+				Entries:      entries,
 				LeaderCommit: rf.commitIndex,
 			}
 			reply := AppendEntriesReply{}
 			rf.mu.Unlock()
-			rf.sendAppendEntries(peer, &args, &reply)
+			DPrintf(
+				"sending AppendEntries for agreement: leader=%d, peer=%d, req=%+v",
+				rf.me,
+				peer,
+				args,
+			)
+			if ok := rf.sendAppendEntries(peer, &args, &reply); ok {
+				rf.mu.Lock()
+				defer rf.mu.Unlock()
+
+				// stale response
+				if rf.currentState == Leader && reply.Term != args.Term {
+					return
+				}
+
+				if reply.Success {
+					rf.nextIndex[peer] = ni + len(entries)
+					rf.matchIndex[peer] = rf.nextIndex[peer] - 1
+
+					// update leader commitIndex if quorum is reached
+					for i := rf.commitIndex + 1; i < len(rf.logs); i++ {
+						if rf.logs[i].Term != rf.currentTerm {
+							break
+						}
+						matchCount := 1
+						for j := range rf.peers {
+							if rf.matchIndex[j] >= i {
+								matchCount++
+							}
+						}
+						if matchCount*2 > len(rf.peers)+1 {
+							rf.commitIndex = i
+						}
+					}
+				} else {
+					rf.nextIndex[peer] = ni - 1
+				}
+			}
 		}(idx)
 	}
 
@@ -567,6 +609,17 @@ func Make(
 	rf.logs = []LogEntry{
 		{Command: nil, Term: 0},
 	}
+
+	// for each server, index of the next log entry to send to that server
+	// initialized to leader last log index + 1
+	rf.nextIndex = make([]int, len(peers))
+	for i := range rf.nextIndex {
+		rf.nextIndex[i] = 1
+	}
+
+	// for each server, index of highest log entry known to be replicated
+	// on server (initialized to 0)
+	rf.matchIndex = make([]int, len(peers))
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
