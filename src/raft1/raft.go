@@ -193,6 +193,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	if rf.currentTerm == args.Term &&
 		(rf.votedFor == -1 || rf.votedFor == args.CandidateID) &&
+		// election restriction
 		(args.LastLogTerm > lastLogTerm ||
 			args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex) {
 		reply.Term = args.Term
@@ -419,7 +420,7 @@ func (rf *Raft) Start(command any) (int, int, bool) {
 								matchCount++
 							}
 						}
-						if matchCount*2 > len(rf.peers)+1 {
+						if matchCount*2 > len(rf.peers) {
 							rf.commitIndex = i
 						}
 					}
