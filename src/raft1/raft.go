@@ -162,6 +162,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 
+	lastLogIndex := -1
+	lastLogTerm := -1
+	if len(rf.logs) > 0 {
+		lastLogIndex = len(rf.logs) - 1
+		lastLogTerm = rf.logs[lastLogIndex].Term
+	}
+
 	if args.Term < rf.currentTerm {
 		DPrintf("stale RequestVote: receiver=%d, term=%d, requester=%d, term=%d\n",
 			rf.me,
@@ -184,8 +191,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.becomeFollower(args.Term)
 	}
 
-	// TODO: Receiver implementation criterion 2
-	if rf.currentTerm == args.Term && (rf.votedFor == -1 || rf.votedFor == args.CandidateID) {
+	if rf.currentTerm == args.Term &&
+		(rf.votedFor == -1 || rf.votedFor == args.CandidateID) &&
+		(args.LastLogTerm > lastLogTerm ||
+			args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex) {
 		reply.Term = args.Term
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateID
@@ -480,11 +489,19 @@ func (rf *Raft) startElection() {
 	for idx := range rf.peers {
 		go func(peerID int) {
 			if idx != rf.me {
+				rf.mu.Lock()
+				lastLogIndex := -1
+				lastLogTerm := -1
+				if len(rf.logs) > 0 {
+					lastLogIndex = len(rf.logs) - 1
+					lastLogTerm = rf.logs[lastLogIndex].Term
+				}
+				rf.mu.Unlock()
 				args := RequestVoteArgs{
-					Term:        cachedTerm,
-					CandidateID: rf.me,
-					// TODO: LastLogIndex
-					// TODO: LastLogTerm
+					Term:         cachedTerm,
+					CandidateID:  rf.me,
+					LastLogIndex: lastLogIndex,
+					LastLogTerm:  lastLogTerm,
 				}
 				reply := RequestVoteReply{}
 				if ok := rf.sendRequestVote(idx, &args, &reply); !ok {
