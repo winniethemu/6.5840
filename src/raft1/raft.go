@@ -195,7 +195,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		(rf.votedFor == -1 || rf.votedFor == args.CandidateID) &&
 		// election restriction
 		(args.LastLogTerm > lastLogTerm ||
-			args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex) {
+			(args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex)) {
 		reply.Term = args.Term
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateID
@@ -261,18 +261,18 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
+	if rf.currentTerm > args.Term {
+		reply.Success = false
+		reply.Term = rf.currentTerm
+		return
+	}
+
 	if rf.currentTerm < args.Term {
 		DPrintf(
 			"term out of date in AppendEntries, becoming follower: peer=%d\n",
 			rf.me,
 		)
 		rf.becomeFollower(args.Term)
-	}
-
-	if rf.currentTerm > args.Term {
-		reply.Success = false
-		reply.Term = rf.currentTerm
-		return
 	}
 
 	// Candidate finds out that another peer has won the election for this term
