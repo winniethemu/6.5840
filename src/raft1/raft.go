@@ -257,10 +257,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if rf.killed() {
-		return
-	}
-
 	if rf.currentTerm > args.Term {
 		reply.Success = false
 		reply.Term = rf.currentTerm
@@ -316,9 +312,6 @@ func (rf *Raft) sendHeartbeat() {
 			continue
 		}
 		go func() {
-			if rf.killed() {
-				return
-			}
 			rf.mu.Lock()
 			args := AppendEntriesArgs{
 				Term:         cachedTerm,
@@ -383,10 +376,6 @@ func (rf *Raft) Start(command any) (int, int, bool) {
 		}
 
 		go func(peer int) {
-			if rf.killed() {
-				return
-			}
-
 			rf.mu.Lock()
 
 			ni := rf.nextIndex[peer]
@@ -481,7 +470,7 @@ func (rf *Raft) startLeader() {
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 
-		for {
+		for !rf.killed() {
 			rf.sendHeartbeat()
 			<-ticker.C
 			rf.mu.Lock()
@@ -508,10 +497,6 @@ func (rf *Raft) startElection() {
 	for idx := range rf.peers {
 		go func(peerID int) {
 			if idx != rf.me {
-				if rf.killed() {
-					return
-				}
-
 				rf.mu.Lock()
 				lastLogIndex := -1
 				lastLogTerm := -1
