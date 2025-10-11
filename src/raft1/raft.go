@@ -158,10 +158,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if rf.killed() {
-		return
-	}
-
 	lastLogIndex := -1
 	lastLogTerm := -1
 	if len(rf.logs) > 0 {
@@ -327,10 +323,6 @@ func (rf *Raft) sendHeartbeat() {
 				return
 			}
 
-			if rf.killed() {
-				return
-			}
-
 			rf.mu.Lock()
 			defer rf.mu.Unlock()
 			if cachedTerm < reply.Term {
@@ -403,16 +395,13 @@ func (rf *Raft) Start(command any) (int, int, bool) {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
 
-				if rf.killed() {
-					return
-				}
-
-				// stale response
-				if rf.currentState == Leader && reply.Term != args.Term {
-					return
-				}
-
 				if reply.Success {
+					DPrintf(
+						"successful AppendEntries: leader=%d, peer=%d, req=%+v",
+						rf.me,
+						peer,
+						args,
+					)
 					rf.nextIndex[peer] = ni + len(entries)
 					rf.matchIndex[peer] = rf.nextIndex[peer] - 1
 
@@ -432,6 +421,12 @@ func (rf *Raft) Start(command any) (int, int, bool) {
 						}
 					}
 				} else {
+					DPrintf(
+						"failed to AppendEntries: leader=%d, peer=%d, req=%+v",
+						rf.me,
+						peer,
+						args,
+					)
 					rf.nextIndex[peer] = ni - 1
 				}
 			}
@@ -517,10 +512,6 @@ func (rf *Raft) startElection() {
 				}
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
-
-				if rf.killed() {
-					return
-				}
 
 				if rf.currentState != Candidate {
 					DPrintf(
