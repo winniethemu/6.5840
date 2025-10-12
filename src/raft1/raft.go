@@ -349,12 +349,14 @@ func (rf *Raft) sendHeartbeat() {
 // term. the third return value is true if this server believes it is
 // the leader.
 func (rf *Raft) Start(command any) (int, int, bool) {
+	rf.mu.Lock()
+
 	// Your code here (3B).
 	if rf.currentState != Leader {
+		rf.mu.Unlock()
 		return -1, -1, false
 	}
 
-	rf.mu.Lock()
 	index := len(rf.logs)
 	term := rf.currentTerm
 	rf.logs = append(rf.logs, LogEntry{Command: command, Term: term})
