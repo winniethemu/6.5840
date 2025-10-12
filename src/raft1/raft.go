@@ -349,19 +349,17 @@ func (rf *Raft) sendHeartbeat() {
 // term. the third return value is true if this server believes it is
 // the leader.
 func (rf *Raft) Start(command any) (int, int, bool) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	index := len(rf.logs)
-	term := rf.currentTerm
-	isLeader := rf.currentState == Leader
-
 	// Your code here (3B).
-	if !isLeader {
+	if rf.currentState != Leader {
 		return -1, -1, false
 	}
 
+	rf.mu.Lock()
+	index := len(rf.logs)
+	term := rf.currentTerm
 	rf.logs = append(rf.logs, LogEntry{Command: command, Term: term})
+	rf.mu.Unlock()
+
 	for idx := range rf.peers {
 		if idx == rf.me {
 			continue
