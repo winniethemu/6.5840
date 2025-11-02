@@ -427,7 +427,7 @@ func (rf *Raft) Start(command any) (int, int, bool) {
 						peer,
 						args,
 					)
-					rf.nextIndex[peer] = ni - 1
+					rf.nextIndex[peer] = max(ni-1, 1)
 				}
 			}
 		}(idx)
@@ -561,10 +561,12 @@ func (rf *Raft) ticker() {
 			rf.mu.Unlock()
 			return
 		}
+		rf.mu.Unlock()
 
 		// Sleep for a short interval before checking again
 		time.Sleep(10 * time.Millisecond)
 
+		rf.mu.Lock()
 		// Check if election timeout has occurred
 		if elapsed := time.Since(rf.electionReset); elapsed >= electionTimeout {
 			DPrintf("election timeout occurred: peer=%d, elapsed=%v, timeout=%v\n",
@@ -616,7 +618,7 @@ func Make(
 	rf.me = me
 
 	// Your initialization code here (3A, 3B, 3C).
-	rf.currentTerm = 1
+	rf.currentTerm = 0
 	rf.currentState = Follower
 	rf.votedFor = -1
 	rf.electionReset = time.Now()
