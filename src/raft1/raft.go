@@ -298,24 +298,26 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 func (rf *Raft) sendHeartbeat() {
 	rf.mu.Lock()
 	cachedTerm := rf.currentTerm
-	prevLogIndex := len(rf.logs) - 1
-	prevLogTerm := rf.logs[prevLogIndex].Term
-	leaderCommit := rf.commitIndex
 	rf.mu.Unlock()
 
 	for idx := range rf.peers {
 		if idx == rf.me {
 			continue
 		}
-		go func() {
+		go func(peer int) {
 			rf.mu.Lock()
+			ni := rf.nextIndex[peer]
+			prevLogIndex := ni - 1
+			prevLogTerm := rf.logs[prevLogIndex].Term
+			entries := rf.logs[ni:]
+
 			args := AppendEntriesArgs{
 				Term:         cachedTerm,
 				LeaderID:     rf.me,
 				PrevLogIndex: prevLogIndex,
 				PrevLogTerm:  prevLogTerm,
-				Entries:      []LogEntry{},
-				LeaderCommit: leaderCommit,
+				Entries:      entries,
+				LeaderCommit: rf.commitIndex,
 			}
 			rf.mu.Unlock()
 			reply := AppendEntriesReply{}
@@ -332,7 +334,7 @@ func (rf *Raft) sendHeartbeat() {
 				)
 				rf.becomeFollower(reply.Term)
 			}
-		}()
+		}(idx)
 	}
 }
 
@@ -582,7 +584,7 @@ func (rf *Raft) ticker() {
 func (rf *Raft) applier() {
 	for !rf.killed() {
 		rf.mu.Lock()
-		for rf.lastApplied < rf.commitIndex && rf.lastApplied < len(rf.logs) {
+		for rf.lastApplied < rf.commitIndex && rf.lastApplied < len(rf.logs)-1 {
 			rf.lastApplied++
 			entry := rf.logs[rf.lastApplied]
 			message := raftapi.ApplyMsg{
